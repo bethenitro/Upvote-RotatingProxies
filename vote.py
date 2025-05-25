@@ -324,8 +324,41 @@ async def upvote_post(account_id: int, post_url: str, proxy_config: Dict[str, An
 
                 if aria_pressed == "false":
                     logger.info(f"[Account {account_id}] Post not upvoted, performing upvote: {post_url}")
-                    await button.click()
-                    logger.debug(f"[Account {account_id}] Upvote button clicked")
+                    
+                    # Add retry mechanism for click
+                    max_retries = 3
+                    retry_count = 0
+                    click_success = False
+                    
+                    while retry_count < max_retries and not click_success:
+                        try:
+                            # Ensure element is in viewport
+                            await button.scroll_into_view_if_needed()
+                            await HumanBehavior.random_delay(1000, 2000)
+                            
+                            # Check if element is still visible and enabled
+                            is_visible = await button.is_visible()
+                            is_enabled = await button.is_enabled()
+                            
+                            if not is_visible or not is_enabled:
+                                logger.warning(f"[Account {account_id}] Button not ready for click (visible: {is_visible}, enabled: {is_enabled})")
+                                retry_count += 1
+                                await HumanBehavior.random_delay(2000, 4000)
+                                continue
+                            
+                            # Try to click with increased timeout
+                            await button.click(timeout=60000)  # Increased timeout to 60 seconds
+                            click_success = True
+                            logger.debug(f"[Account {account_id}] Upvote button clicked successfully")
+                            
+                        except Exception as e:
+                            retry_count += 1
+                            logger.warning(f"[Account {account_id}] Click attempt {retry_count} failed: {str(e)}")
+                            if retry_count < max_retries:
+                                await HumanBehavior.random_delay(2000, 4000)
+                            else:
+                                raise Exception(f"Failed to click upvote button after {max_retries} attempts: {str(e)}")
+                    
                     await HumanBehavior.random_delay(2000, 5000)
 
                     button2 = await page.wait_for_selector(voted_selector, timeout=15000)
@@ -430,7 +463,7 @@ async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dic
 
         config = {
             "fingerprint": stealth.fingerprint,
-            "headless": False,
+            "headless": True,
             "os": "windows",
             "screen": Screen(max_width=1280, max_height=720),
             "geoip": True,
@@ -494,8 +527,41 @@ async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dic
 
                 if aria_pressed == "false":
                     logger.info(f"[Account {account_id}] Post not upvoted, performing upvote: {post_url}")
-                    await button.click()
-                    logger.debug(f"[Account {account_id}] Upvote button clicked")
+                    
+                    # Add retry mechanism for click
+                    max_retries = 3
+                    retry_count = 0
+                    click_success = False
+                    
+                    while retry_count < max_retries and not click_success:
+                        try:
+                            # Ensure element is in viewport
+                            await button.scroll_into_view_if_needed()
+                            await HumanBehavior.random_delay(1000, 2000)
+                            
+                            # Check if element is still visible and enabled
+                            is_visible = await button.is_visible()
+                            is_enabled = await button.is_enabled()
+                            
+                            if not is_visible or not is_enabled:
+                                logger.warning(f"[Account {account_id}] Button not ready for click (visible: {is_visible}, enabled: {is_enabled})")
+                                retry_count += 1
+                                await HumanBehavior.random_delay(2000, 4000)
+                                continue
+                            
+                            # Try to click with increased timeout
+                            await button.click(timeout=60000)  # Increased timeout to 60 seconds
+                            click_success = True
+                            logger.debug(f"[Account {account_id}] Upvote button clicked successfully")
+                            
+                        except Exception as e:
+                            retry_count += 1
+                            logger.warning(f"[Account {account_id}] Click attempt {retry_count} failed: {str(e)}")
+                            if retry_count < max_retries:
+                                await HumanBehavior.random_delay(2000, 4000)
+                            else:
+                                raise Exception(f"Failed to click upvote button after {max_retries} attempts: {str(e)}")
+                    
                     await HumanBehavior.random_delay(2000, 5000)
 
                     button2 = await page.wait_for_selector(voted_selector, timeout=15000)

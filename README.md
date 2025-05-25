@@ -1,87 +1,78 @@
 # RedditUpvote – Beginner-Friendly Guide
 
-Welcome to **RedditUpvote**, a simple tool that helps you automate upvoting posts on Reddit using multiple accounts. This guide is designed for absolute beginners, so don't worry if you're new to programming or automation. We'll walk you through each step with clear instructions and helpful visuals.
+Welcome to **RedditUpvote**, a simple tool that automates upvoting Reddit posts using multiple accounts. This guide is designed for **absolute beginners** — no coding experience needed!
 
 ---
 
 ## 📋 What You’ll Need
 
-Before we begin, make sure you have:
+Before starting, make sure you have:
 
-* **A Windows PC** (this guide is tailored for Windows users)
-* **Python 3.11.3** installed on your computer
-* **Internet access** to download necessary files
-* **Reddit accounts** that you want to use for upvoting
+* ✅ A **Windows PC**
+* ✅ **Python 3.11.3** installed
+* ✅ A working **internet connection**
+* ✅ **Reddit accounts**
+* ✅ *(Optional)* **Proxy details** (for safer and more anonymous usage)
 
 ---
 
 ## 🛠️ Step-by-Step Setup
 
-### 1. Clone the Repository
+### 1. Clone the Project
 
-This means copying the project files to your computer.
+1. Open **PowerShell**
+2. Run this command to download RedditUpvote:
 
-1. Open **PowerShell** (a program on your computer).
-2. Type the following command and press Enter:
+```powershell
+git clone https://github.com/bethenitro/Upvote-RotatingProxies.git
+cd Upvote-RotatingProxies
+```
 
-   ```powershell
-   git clone https://github.com/NikantYadav/RedditUpvote.git
-   cd RedditUpvote
-   ```
-
-> *If you don't have Git installed, google how to install it.*
+> ❗ Don’t have Git installed? Just Google: *“how to install Git on Windows”* and follow the steps.
 
 ---
 
-### 2. Create `account_state.json`
+### 2. Create Required Files & Folders
 
-In PowerShell, run this command:
+#### ➤ Create `account_state.json`:
 
 ```powershell
 New-Item account_state.json -ItemType File
 ```
 
-This creates an empty file where your account data will be stored.
+> Make sure you’re inside the `RedditUpvote` folder before running this.
 
-> ⚠️ Make sure you're inside the `RedditUpvote` folder when you run this.
-
----
-
-### 3. Create `profiles` Folder
-
-Now create a folder to store Reddit session data:
+#### ➤ Create the `profiles` folder:
 
 ```powershell
 New-Item -ItemType Directory -Name profiles
 ```
 
-This folder will hold login information for each account after they’re added.
+This folder will store login session data for your Reddit accounts.
 
 ---
 
-### 4. Create a Virtual Environment
+### 3. Set Up the Python Environment
 
-This step sets up a clean workspace for the project.
-
-In PowerShell, type:
+#### ➤ Create a virtual environment:
 
 ```powershell
 python -m venv env
 ```
 
-Then activate the virtual environment:
+#### ➤ Activate the virtual environment:
 
 ```powershell
 .\env\Scripts\activate
 ```
 
+> You’ll now see `(env)` before your prompt — this means the environment is active.
+
 ---
 
-### 5. Install Required Packages
+### 4. Install Project Dependencies
 
-This installs the necessary tools for the project.
-
-In PowerShell, type:
+Install all required Python packages:
 
 ```powershell
 pip install -r requirements.txt
@@ -91,66 +82,115 @@ pip install -r requirements.txt
 
 ## 👤 Adding Reddit Accounts
 
-Now, let's add your Reddit accounts to the tool.
+To let the bot log in with your Reddit accounts:
 
-1. In PowerShell, type:
+1. In PowerShell, run:
 
-   ```powershell
-   python account_gui.py
-   ```
+```powershell
+python account_gui.py
+```
 
-> *The first time you run the program, it may take some time as additional packages are installed.*
+2. A window will open. Click **"Add Account"**, then fill in:
 
-2. A window will open.
+* **Account ID** (a name to identify the account)
+* **Proxy (optional)** – If you're using rotating proxies, **leave this blank** (they are configured later)
+* **Username**
 
-3. Click **"Add Account"** and enter:
+3. The bot will open Reddit, scroll, simulate natural activity, and close.
 
-   * **Account ID**
-   * **Proxy details** (if you have them)
-   * **Username**
+4. Click **"Exit & Save"** to finish.
 
-4. The tool will open Reddit, log in, browse posts, scroll a little, and then close the window.
-
-5. Click **"Exit & Save"** to save the account details.
-
-> *Repeat this process for each Reddit account you want to add.*
+> 🔁 Repeat this for each account you want to add.
 
 ---
 
-## 🎯 Running the Bot
+## 🔄 Rotating Proxies 
 
-After adding accounts, set up where you want the bot to upvote.
+Using rotating proxies keeps your accounts safe and reduces the chance of getting blocked.
 
-1. In PowerShell, type:
+### Step 1: Create a `mobile_proxies.json` File
 
-   ```powershell
-   python target_gui.py
-   ```
+In the **main folder**, create a file named:
 
-2. A window will open. Click on **"New Instance"**.
+```
+mobile_proxies.json
+```
 
-3. A new window will open for you to configure the target.
+Then open it and paste this example structure:
 
-4. Enter the specific post URL you want to target.
+```json
+[
+  {
+    "server": "proxy1.server:port",
+    "username": "proxy1_username",
+    "password": "proxy1_password",
+    "rotation_url": "https://your-proxy-rotation-url-1"
+  },
+  {
+    "server": "proxy2.server:port",
+    "username": "proxy2_username",
+    "password": "proxy2_password",
+    "rotation_url": "https://your-proxy-rotation-url-2"
+  }
+]
+```
 
-5. Adjust any settings as needed.
+### What Each Field Means:
 
-6. Click on **"Start Upvoting"**.
+| Field          | Description                                                               |
+| -------------- | ------------------------------------------------------------------------- |
+| `server`       | The proxy address and port (e.g. `104.248.168.156:8019`)                  |
+| `username`     | Your proxy account username                                               |
+| `password`     | Your proxy account password                                               |
+| `rotation_url` | A special link your proxy provider gives you to **change the IP address** |
 
-The bot will begin the upvoting process:
+> ✅ Make sure your proxy provider supports IP rotation through a URL.
 
-* Multiple Reddit windows will open, each corresponding to a Reddit account you've configured.
-* Each account will log in, navigate to the specified post, and perform the upvote.
-* After completing the upvote, each window will close automatically.
+---
+
+
+## 🎯 Upvoting a Reddit Post
+
+After setting up accounts and (optionally) proxies, here’s how to run the bot:
+
+1. In PowerShell, run:
+
+```powershell
+python target_gui.py
+```
+
+2. A window will open. Click **“New Instance”**
+
+3. Fill in:
+
+* The **Reddit post URL** you want to upvote
+* Optional settings like **upvote delay** or **account filtering**
+
+4. Click **“Start Upvoting”**
+
+The bot will:
+
+* Open Reddit using each account
+* Log in, scroll, simulate browsing
+* Upvote the post
+* Close the browser window
+
+> 🔁 This process is repeated for each account, and rotating proxies are used automatically if configured.
 
 ---
 
 ## 📝 Notes
 
-* **First-Time Setup**: The first time you run `account_gui.py`, it may take some time as additional packages are installed.
-* **Proxy Details**: If you don't have proxy details, you can leave them blank.
-* **Reddit Interaction**: The bot simulates human-like interactions by opening Reddit, logging in, browsing posts, scrolling a little, and then closing the window.
+* ⚠️ The **first time** you run `account_gui.py`, it may take extra time — it's setting up everything.
+* 🚫 If you don’t have proxy info, just leave the field blank when adding accounts.
+* 🌐 Proxies are configured globally using `mobile_proxies.json`, not per account.
 
 ---
 
-If you have any questions or need further assistance, feel free to reach out. Happy automating!
+## 💬 Need Help?
+
+If you have any questions or run into issues, feel free to [open an issue on GitHub](https://github.com/bethenitro/Upvote-RotatingProxies/issues) or check Reddit automation communities for help.
+
+---
+
+Happy upvoting! 🚀

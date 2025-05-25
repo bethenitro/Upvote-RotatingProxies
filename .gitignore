@@ -1,0 +1,17 @@
+accounts.json
+proxies.json
+env/
+accounts/
+testaccounts/
+profiles/
+reddit_stealth.log
+chrome/
+account_state.json
+account_gui.spec
+target_gui.spec
+mobile_proxies.json
+
+
+__pycache__/
+build/
+dist/

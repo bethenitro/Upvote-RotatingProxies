@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from vote import upvote_post  # Ensure this is your actual upvote function
 from vote import upvote_post_low_data
 import os
+import aiohttp
+
 # File to store the account state
 STATE_FILE = 'account_state.json'
 
@@ -65,6 +67,42 @@ def load_accounts(file_path='profiles/accounts.json'):
         return {}
   
 
+def load_mobile_proxies(file_path='mobile_proxies.json'):
+    try:
+        with open(file_path, 'r') as f:
+            proxies = json.load(f)
+            # Validate proxy structure
+            for proxy in proxies:
+                if not all(key in proxy for key in ['server', 'username', 'password', 'rotation_url']):
+                    logger.error(f"Invalid proxy configuration: {proxy}")
+                    return []
+            return proxies
+    except Exception as e:
+        logger.error(f"Failed to load mobile proxies: {str(e)}")
+        return []
+
+async def rotate_proxy_ip(rotation_url: str):
+    """
+    Rotate the proxy IP by making a request to the rotation URL.
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(rotation_url) as response:
+                if response.status == 200:
+                    response_data = await response.json()
+                    if response_data.get('success') == 1:
+                        logger.info(f"Successfully rotated proxy IP using URL: {rotation_url}")
+                        return True
+                    else:
+                        error_msg = response_data.get('error', 'Unknown error')
+                        logger.error(f"Failed to rotate proxy IP: {error_msg}")
+                        return False
+                else:
+                    logger.error(f"Failed to rotate proxy IP. Status: {response.status}")
+                    return False
+    except Exception as e:
+        logger.error(f"Error rotating proxy IP: {str(e)}")
+        return False
 
 async def orchestrate_batches(
     post_url: str,
@@ -79,12 +117,17 @@ async def orchestrate_batches(
     Orchestrate upvotes in batches with enhanced account-wise logging.
     Keeps account state persistent across requests.
     """
-    
     state = load_state()
     last_upvote = {acc: datetime.fromisoformat(state.get(str(acc), {}).get('last_upvote', '1970-01-01T00:00:00')) for acc in account_ids}
     daily_count = {acc: state.get(str(acc), {}).get('daily_count', 0) for acc in account_ids}
     votes_done = 0
     min_gap = timedelta(minutes=min_gap_minutes)
+
+    # Load mobile proxies
+    mobile_proxies = load_mobile_proxies()
+    if not mobile_proxies:
+        logger.error("No mobile proxies available. Exiting.")
+        return
 
     # Log initial account states
     logger.debug("Initial account states:")
@@ -135,9 +178,13 @@ async def orchestrate_batches(
         for acc in batch:
             try:
                 account = account_data[str(acc)]
-                print(account)
-                proxy_config = account.get('proxy', {})
-                logger.debug(proxy_config)
+                # Randomly select a proxy for this account
+                proxy_config = random.choice(mobile_proxies)
+                
+                # Rotate proxy IP before each upvote
+                await rotate_proxy_ip(proxy_config['rotation_url'])
+                
+                logger.debug(f"Using proxy configuration for account {acc}: {proxy_config['server']}")
                 tasks.append(
                     upvote_post(
                         acc,
@@ -211,6 +258,12 @@ async def orchestrate_batches_low_data(
     votes_done = 0
     min_gap = timedelta(minutes=min_gap_minutes)
 
+    # Load mobile proxies
+    mobile_proxies = load_mobile_proxies()
+    if not mobile_proxies:
+        logger.error("No mobile proxies available. Exiting.")
+        return
+
     # Log initial account states
     logger.debug("Initial account states:")
     for acc in account_ids:
@@ -260,9 +313,13 @@ async def orchestrate_batches_low_data(
         for acc in batch:
             try:
                 account = account_data[str(acc)]
-                print(account)
-                proxy_config = account.get('proxy', {})
-                logger.debug(proxy_config)
+                # Randomly select a proxy for this account
+                proxy_config = random.choice(mobile_proxies)
+                
+                # Rotate proxy IP before each upvote
+                await rotate_proxy_ip(proxy_config['rotation_url'])
+                
+                logger.debug(f"Using proxy configuration for account {acc}: {proxy_config['server']}")
                 tasks.append(
                     upvote_post_low_data(
                         acc,
