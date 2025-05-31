@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from vote import upvote_post  # Ensure this is your actual upvote function
 from vote import upvote_post_low_data
 import os
-import aiohttp
+from proxy_rotator import rotate_proxy
 
 # File to store the account state
 STATE_FILE = 'account_state.json'
@@ -81,29 +81,6 @@ def load_mobile_proxies(file_path='mobile_proxies.json'):
         logger.error(f"Failed to load mobile proxies: {str(e)}")
         return []
 
-async def rotate_proxy_ip(rotation_url: str):
-    """
-    Rotate the proxy IP by making a request to the rotation URL.
-    """
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(rotation_url) as response:
-                if response.status == 200:
-                    response_data = await response.json()
-                    if response_data.get('success') == 1:
-                        logger.info(f"Successfully rotated proxy IP using URL: {rotation_url}")
-                        return True
-                    else:
-                        error_msg = response_data.get('error', 'Unknown error')
-                        logger.error(f"Failed to rotate proxy IP: {error_msg}")
-                        return False
-                else:
-                    logger.error(f"Failed to rotate proxy IP. Status: {response.status}")
-                    return False
-    except Exception as e:
-        logger.error(f"Error rotating proxy IP: {str(e)}")
-        return False
-
 async def orchestrate_batches(
     post_url: str,
     account_ids: list,
@@ -140,11 +117,10 @@ async def orchestrate_batches(
     while votes_done < total_votes:
         batch_size = min(votes_per_min, total_votes - votes_done)
         now = datetime.now()
-        
         # Find eligible accounts
         eligible = [
             acc for acc in account_ids
-            if (now - last_upvote[acc] >= min_gap) 
+            if (now - last_upvote[acc] >= min_gap)
             and (daily_count[acc] < max_daily_per_account)
         ]
         
@@ -178,22 +154,39 @@ async def orchestrate_batches(
         for acc in batch:
             try:
                 account = account_data[str(acc)]
-                # Randomly select a proxy for this account
-                proxy_config = random.choice(mobile_proxies)
+                max_proxy_attempts = 5  # Maximum attempts to get a rotated proxy
+                proxy_attempt = 0
                 
-                # Rotate proxy IP before each upvote
-                await rotate_proxy_ip(proxy_config['rotation_url'])
+                while proxy_attempt < max_proxy_attempts:
+                    try:
+                        # Rotate proxy before each upvote to get a fresh IP
+                        proxy_config = rotate_proxy()
+                        logger.debug(f"Using proxy configuration for account {acc}: {proxy_config['server']}")
+                        tasks.append(
+                            upvote_post(
+                                acc,
+                                post_url,
+                                proxy_config=proxy_config
+                            )
+                        )
+                        break  # Successfully got a rotated proxy, proceed with the task
+                    except RuntimeError as e:
+                        proxy_attempt += 1
+                        if proxy_attempt >= max_proxy_attempts:
+                            logger.error(f"Failed to get rotated proxy for account {acc} after {max_proxy_attempts} attempts")
+                            raise
+                        logger.warning(f"Failed to rotate proxy for account {acc}, attempt {proxy_attempt}/{max_proxy_attempts}")
+                        await asyncio.sleep(10)  # Wait before retrying
                 
-                logger.debug(f"Using proxy configuration for account {acc}: {proxy_config['server']}")
-                tasks.append(
-                    upvote_post(
-                        acc,
-                        post_url,
-                        proxy_config=proxy_config
-                    )
-                )
             except KeyError:
                 logger.error(f"Account {acc} not found in account data")
+            except Exception as e:
+                logger.error(f"Error setting up task for account {acc}: {str(e)}")
+
+        if not tasks:
+            logger.warning("No tasks were created for this batch, waiting...")
+            await asyncio.sleep(60)
+            continue
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
@@ -313,12 +306,8 @@ async def orchestrate_batches_low_data(
         for acc in batch:
             try:
                 account = account_data[str(acc)]
-                # Randomly select a proxy for this account
-                proxy_config = random.choice(mobile_proxies)
-                
-                # Rotate proxy IP before each upvote
-                await rotate_proxy_ip(proxy_config['rotation_url'])
-                
+                # Rotate proxy before each upvote to get a fresh IP
+                proxy_config = rotate_proxy()
                 logger.debug(f"Using proxy configuration for account {acc}: {proxy_config['server']}")
                 tasks.append(
                     upvote_post_low_data(

@@ -12,6 +12,7 @@ target_gui.spec
 mobile_proxies.json
 
 
+shifted/
 __pycache__/
 build/
 dist/
