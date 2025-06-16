@@ -263,6 +263,7 @@ async def upvote_post(account_id: int, post_url: str, proxy_config: Dict[str, An
 
         config = {
             "fingerprint": stealth.fingerprint,
+            "headless": "virtual",
             "os": "windows",
             "screen": Screen(max_width=1280, max_height=720),
             "geoip": True,
@@ -444,8 +445,6 @@ async def orchestrate_upvotes(account_id: int, post_urls: list, proxy_config: Di
         logger.error(f"[Account {account_id}] Orchestration failed: {str(e)}")
         raise
 
-
-
 async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dict[str, Any] = None):
     logger.info(f"[Account {account_id}] : Starting upvote process for account {account_id} on post {post_url}")
     try:
@@ -463,7 +462,7 @@ async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dic
 
         config = {
             "fingerprint": stealth.fingerprint,
-            "headless": True,
+            "headless": "virtual",
             "os": "windows",
             "screen": Screen(max_width=1280, max_height=720),
             "geoip": True,
