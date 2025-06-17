@@ -17,3 +17,5 @@ shifted/
 __pycache__/
 build/
 dist/
+logs/
+bot_integration.log

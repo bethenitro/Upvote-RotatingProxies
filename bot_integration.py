@@ -34,7 +34,50 @@ from typing import Dict, Any, Optional
 # Import the bot's functions
 from target import orchestrate_batches_low_data, load_accounts
 
-# Setup logging
+def setup_order_logging(order_id: str):
+    """Setup logging with order-specific log file."""
+    # Create logs directory if it doesn't exist
+    logs_dir = Path('logs')
+    logs_dir.mkdir(exist_ok=True)
+    
+    # Create order-specific log filename
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_filename = logs_dir / f'order_{order_id}_{timestamp}.log'
+    
+    # Create a custom logger for this order
+    order_logger = logging.getLogger(f'order_{order_id}')
+    order_logger.setLevel(logging.DEBUG)
+    
+    # Remove existing handlers to avoid duplicates
+    for handler in order_logger.handlers[:]:
+        order_logger.removeHandler(handler)
+    
+    # File handler
+    file_handler = logging.FileHandler(log_filename, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    # Formatter
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Add handlers
+    order_logger.addHandler(file_handler)
+    order_logger.addHandler(console_handler)
+    
+    # Prevent propagation to root logger
+    order_logger.propagate = False
+    
+    order_logger.info(f"Logging initialized for order {order_id}")
+    order_logger.info(f"Log file: {log_filename}")
+    
+    return order_logger, str(log_filename)
+
+# Setup basic logging for the integration script itself
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
@@ -139,6 +182,9 @@ class BotIntegration:
         self.upvotes = upvotes
         self.upvotes_per_minute = upvotes_per_minute
         
+        # Setup order-specific logging
+        self.logger, self.log_file = setup_order_logging(order_id)
+        
         # Default configuration
         self.max_daily_per_account = 5
         self.min_gap_minutes = 30
@@ -147,38 +193,66 @@ class BotIntegration:
         global _progress_tracker
         _progress_tracker = ProgressTracker(upvotes)
         
-        logger.info(f"Initialized bot integration for order {order_id}")
-        logger.info(f"Target URL: {reddit_url}")
-        logger.info(f"Upvotes requested: {upvotes} at {upvotes_per_minute}/min")
+        self.logger.info(f"Initialized bot integration for order {order_id}")
+        self.logger.info(f"Target URL: {reddit_url}")
+        self.logger.info(f"Upvotes requested: {upvotes} at {upvotes_per_minute}/min")
     
     def validate_inputs(self) -> bool:
         """Validate the input parameters."""
         try:
             # Validate URL format
             if not self.reddit_url.startswith('https://') or 'reddit.com' not in self.reddit_url:
-                logger.error(f"Invalid Reddit URL format: {self.reddit_url}")
+                self.logger.error(f"Invalid Reddit URL format: {self.reddit_url}")
                 return False
             
             # Validate numeric parameters
             if self.upvotes <= 0:
-                logger.error(f"Invalid upvotes count: {self.upvotes}")
+                self.logger.error(f"Invalid upvotes count: {self.upvotes}")
                 return False
                 
             if self.upvotes_per_minute <= 0:
-                logger.error(f"Invalid upvotes per minute: {self.upvotes_per_minute}")
+                self.logger.error(f"Invalid upvotes per minute: {self.upvotes_per_minute}")
                 return False
             
             # Check if accounts file exists
             accounts_path = Path('profiles/accounts.json')
             if not accounts_path.exists():
-                logger.error(f"Accounts file not found: {accounts_path.absolute()}")
+                self.logger.error(f"Accounts file not found: {accounts_path.absolute()}")
                 return False
             
-            logger.info("Input validation passed")
+            # Check if mobile proxies file exists and has valid proxies
+            proxies_path = Path('mobile_proxies.json')
+            if not proxies_path.exists():
+                self.logger.error(f"Mobile proxies file not found: {proxies_path.absolute()}")
+                return False
+                
+            try:
+                with open(proxies_path, 'r') as f:
+                    proxies = json.load(f)
+                    if not proxies:
+                        self.logger.error("No mobile proxies configured. The mobile_proxies.json file is empty. Please add proxy configurations.")
+                        return False
+                    
+                    # Validate proxy structure
+                    for i, proxy in enumerate(proxies):
+                        if not all(key in proxy for key in ['server', 'username', 'password', 'rotation_url']):
+                            self.logger.error(f"Invalid proxy configuration at index {i}: {proxy}. Missing required fields: server, username, password, rotation_url")
+                            return False
+                    
+                    self.logger.info(f"Validated {len(proxies)} mobile proxy configurations")
+                    
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Invalid JSON in mobile_proxies.json: {str(e)}")
+                return False
+            except Exception as e:
+                self.logger.error(f"Error reading mobile_proxies.json: {str(e)}")
+                return False
+            
+            self.logger.info("Input validation passed")
             return True
             
         except Exception as e:
-            logger.error(f"Validation error: {str(e)}")
+            self.logger.error(f"Validation error: {str(e)}")
             return False
     
     def load_bot_accounts(self) -> tuple[dict, list]:
@@ -187,7 +261,7 @@ class BotIntegration:
             account_data = load_accounts('profiles/accounts.json')
             
             if not account_data:
-                logger.error("No account data loaded from accounts.json")
+                self.logger.error("No account data loaded from accounts.json")
                 return {}, []
             
             # Extract account IDs (assuming they are numeric keys)
@@ -196,15 +270,15 @@ class BotIntegration:
                 try:
                     account_ids.append(int(key))
                 except ValueError:
-                    logger.warning(f"Skipping non-numeric account ID: {key}")
+                    self.logger.warning(f"Skipping non-numeric account ID: {key}")
             
             account_ids.sort()
-            logger.info(f"Loaded {len(account_ids)} accounts: {account_ids}")
+            self.logger.info(f"Loaded {len(account_ids)} accounts: {account_ids}")
             
             return account_data, account_ids
             
         except Exception as e:
-            logger.error(f"Error loading accounts: {str(e)}")
+            self.logger.error(f"Error loading accounts: {str(e)}")
             return {}, []
     
     def log_order_start(self):
@@ -261,7 +335,7 @@ class BotIntegration:
                 self.log_order_completion(False, "No valid accounts available")
                 return False
             
-            logger.info(f"Starting bot execution with {len(account_ids)} accounts")
+            self.logger.info(f"Starting bot execution with {len(account_ids)} accounts")
             
             # Create the bot task
             bot_task = asyncio.create_task(
@@ -272,7 +346,8 @@ class BotIntegration:
                     total_votes=self.upvotes,
                     account_data=account_data,
                     max_daily_per_account=self.max_daily_per_account,
-                    min_gap_minutes=self.min_gap_minutes
+                    min_gap_minutes=self.min_gap_minutes,
+                    custom_logger=self.logger  # Pass the order-specific logger
                 )
             )
             
@@ -289,7 +364,7 @@ class BotIntegration:
             
         except Exception as e:
             error_msg = f"Bot execution failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
+            self.logger.error(error_msg, exc_info=True)
             _progress_tracker.mark_completed(False, error_msg)
             self.log_order_completion(False, error_msg)
             return False
