@@ -47,34 +47,73 @@ logger = logging.getLogger(__name__)
 
 
 class ProgressTracker:
-    """Thread-safe progress tracker for monitoring upvote progress."""
+    """Thread-safe progress tracker for monitoring bot process status."""
     
     def __init__(self, total_upvotes: int):
         self.total_upvotes = total_upvotes
-        self.upvotes_done = 0
         self.status = "pending"
         self.error_message = None
+        self.start_time = None
+        self.end_time = None
+        self.process_task = None
         self.lock = threading.Lock()
     
-    def update_progress(self, upvotes_done: int, status: str = None, error: str = None):
-        """Update the progress in a thread-safe manner."""
+    def start_process(self, task):
+        """Mark the process as started and store the asyncio task."""
         with self.lock:
-            self.upvotes_done = upvotes_done
-            if status:
-                self.status = status
-            if error:
-                self.error_message = error
+            self.status = "running"
+            self.start_time = datetime.now()
+            self.process_task = task
+    
+    def mark_completed(self, success: bool = True, error: str = None):
+        """Mark the process as completed or failed."""
+        with self.lock:
+            self.end_time = datetime.now()
+            if success:
+                self.status = "completed"
+            else:
+                self.status = "failed"
+                if error:
+                    self.error_message = error
+    
+    def is_running(self) -> bool:
+        """Check if the bot process is currently running."""
+        with self.lock:
+            if self.process_task is None:
+                return False
+            return not self.process_task.done()
     
     def get_status(self) -> Dict[str, Any]:
-        """Get current status in a thread-safe manner."""
+        """Get current status based on process state."""
         with self.lock:
-            progress_percentage = round((self.upvotes_done / self.total_upvotes) * 100, 2) if self.total_upvotes > 0 else 0
+            # If we have a task, check if it's still running
+            if self.process_task is not None:
+                if self.process_task.done():
+                    # Process finished, check if it was successful or failed
+                    if self.status == "running":
+                        # Process finished but status wasn't updated manually
+                        try:
+                            # Check if task completed successfully or with exception
+                            exception = self.process_task.exception()
+                            if exception:
+                                self.status = "failed"
+                                self.error_message = str(exception)
+                            else:
+                                self.status = "completed"
+                        except:
+                            self.status = "completed"
+                        self.end_time = datetime.now()
+                else:
+                    # Process is still running
+                    self.status = "running"
+            
             return {
-                "upvotes_done": self.upvotes_done,
-                "total_upvotes": self.total_upvotes,
-                "progress_percentage": progress_percentage,
                 "status": self.status,
-                "error": self.error_message
+                "total_upvotes": self.total_upvotes,
+                "error": self.error_message,
+                "start_time": self.start_time.isoformat() if self.start_time else None,
+                "end_time": self.end_time.isoformat() if self.end_time else None,
+                "is_running": self.is_running()
             }
 
 
@@ -203,183 +242,58 @@ class BotIntegration:
         try:
             self.log_order_start()
             
-            # Update status to running
-            global _progress_tracker
-            _progress_tracker.update_progress(0, "running")
-            
             # Validate inputs
             if not self.validate_inputs():
-                _progress_tracker.update_progress(0, "failed", "Input validation failed")
+                _progress_tracker.mark_completed(False, "Input validation failed")
                 self.log_order_completion(False, "Input validation failed")
                 return False
             
             # Load account data
             account_data, account_ids = self.load_bot_accounts()
             if not account_data or not account_ids:
-                _progress_tracker.update_progress(0, "failed", "Failed to load account data")
+                _progress_tracker.mark_completed(False, "Failed to load account data")
                 self.log_order_completion(False, "Failed to load account data")
                 return False
             
             # Check if we have enough accounts for the requested upvotes
             if len(account_ids) == 0:
-                _progress_tracker.update_progress(0, "failed", "No valid accounts available")
+                _progress_tracker.mark_completed(False, "No valid accounts available")
                 self.log_order_completion(False, "No valid accounts available")
                 return False
             
             logger.info(f"Starting bot execution with {len(account_ids)} accounts")
             
-            # Run the low data version of the bot with progress tracking
-            await self.run_bot_with_progress_tracking(account_data, account_ids)
+            # Create the bot task
+            bot_task = asyncio.create_task(
+                orchestrate_batches_low_data(
+                    post_url=self.reddit_url,
+                    account_ids=account_ids,
+                    votes_per_min=self.upvotes_per_minute,
+                    total_votes=self.upvotes,
+                    account_data=account_data,
+                    max_daily_per_account=self.max_daily_per_account,
+                    min_gap_minutes=self.min_gap_minutes
+                )
+            )
             
-            # Check final status
-            final_status = _progress_tracker.get_status()
-            if final_status["status"] == "failed":
-                self.log_order_completion(False, final_status.get("error"))
-                return False
-            else:
-                _progress_tracker.update_progress(final_status["upvotes_done"], "completed")
-                self.log_order_completion(True)
-                return True
+            # Mark the process as started
+            _progress_tracker.start_process(bot_task)
+            
+            # Wait for the bot to complete
+            await bot_task
+            
+            # Mark as completed successfully
+            _progress_tracker.mark_completed(True)
+            self.log_order_completion(True)
+            return True
             
         except Exception as e:
             error_msg = f"Bot execution failed: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            _progress_tracker.update_progress(_progress_tracker.upvotes_done, "failed", error_msg)
+            _progress_tracker.mark_completed(False, error_msg)
             self.log_order_completion(False, error_msg)
             return False
     
-    async def run_bot_with_progress_tracking(self, account_data: dict, account_ids: list):
-        """Run the bot with progress tracking - exact copy of orchestrate_batches_low_data."""
-        from target import load_state, save_state, load_mobile_proxies, rotate_proxy, upvote_post_low_data
-        import random
-        from datetime import timedelta
-        
-        global _progress_tracker
-        
-        # EXACT COPY OF orchestrate_batches_low_data with progress tracking added
-        state = load_state()
-        last_upvote = {acc: datetime.fromisoformat(state.get(str(acc), {}).get('last_upvote', '1970-01-01T00:00:00')) for acc in account_ids}
-        daily_count = {acc: state.get(str(acc), {}).get('daily_count', 0) for acc in account_ids}
-        votes_done = 0
-        min_gap = timedelta(minutes=self.min_gap_minutes)
-
-        # Load mobile proxies
-        mobile_proxies = load_mobile_proxies()
-        if not mobile_proxies:
-            error_msg = "No mobile proxies available. Exiting."
-            logger.error(error_msg)
-            _progress_tracker.update_progress(votes_done, "failed", error_msg)
-            return
-
-        # Log initial account states
-        logger.debug("Initial account states:")
-        for acc in account_ids:
-            last = last_upvote[acc].strftime('%Y-%m-%d %H:%M') if last_upvote[acc] != datetime.min else "Never"
-            logger.debug(f"Account {acc:2}: Last upvote: {last}, Daily uses: {daily_count[acc]}/{self.max_daily_per_account}")
-
-        logger.info(f"Starting orchestrated batches: {self.upvotes} votes at {self.upvotes_per_minute}/min")
-        
-        while votes_done < self.upvotes:
-            batch_size = min(self.upvotes_per_minute, self.upvotes - votes_done)
-            now = datetime.now()
-            
-            # Find eligible accounts
-            eligible = [
-                acc for acc in account_ids
-                if (now - last_upvote[acc] >= min_gap) 
-                and (daily_count[acc] < self.max_daily_per_account)
-            ]
-            
-            # Log eligibility check
-            logger.debug(f"Eligibility check at {now.strftime('%H:%M:%S')}:")
-            for acc in account_ids:
-                gap_ok = now - last_upvote[acc] >= min_gap
-                daily_ok = daily_count[acc] < self.max_daily_per_account
-                status = "ELIGIBLE" if gap_ok and daily_ok else "INELIGIBLE"
-                last = last_upvote[acc].strftime('%H:%M') if last_upvote[acc] != datetime.min else "Never"
-                logger.debug(f"Account {acc:2}: {status} (Last: {last}, Uses: {daily_count[acc]}/{self.max_daily_per_account}, Gap OK: {gap_ok})")
-
-            if not eligible:
-                logger.warning("No eligible accounts available, waiting...")
-                await asyncio.sleep(60)
-                continue
-                
-            # Select batch
-            batch = random.sample(eligible, min(batch_size, len(eligible)))
-            logger.info(f"Selected batch of {len(batch)} accounts: {batch}")
-            
-            # Log batch details
-            logger.debug("Batch account details:")
-            for acc in batch:
-                last = last_upvote[acc].strftime('%H:%M') if last_upvote[acc] != datetime.min else "Never"
-                logger.debug(f"Account {acc:2}: Last upvote: {last}, Daily uses: {daily_count[acc]}/{self.max_daily_per_account}")
-
-            # Process batch
-            logger.info(f"Starting upvote batch processing")
-            tasks = []
-            for acc in batch:
-                try:
-                    account = account_data[str(acc)]
-                    # Rotate proxy before each upvote to get a fresh IP
-                    proxy_config = rotate_proxy()
-                    logger.debug(f"Using proxy configuration for account {acc}: {proxy_config['server']}")
-                    tasks.append(
-                        upvote_post_low_data(
-                            acc,
-                            self.reddit_url,
-                            proxy_config=proxy_config
-                        )
-                    )
-                except KeyError:
-                    logger.error(f"Account {acc} not found in account data")
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Process results with detailed logging
-            success_count = 0
-            for acc, result in zip(batch, results):
-                current_time = datetime.now()
-                if isinstance(result, Exception):
-                    logger.error(f"Account {acc:2} | ERROR: {str(result)}")
-                else:
-                    success_count += 1
-                    last_upvote[acc] = current_time
-                    daily_count[acc] += 1
-                    votes_done += 1
-                    next_available = (current_time + min_gap).strftime('%H:%M')
-                    logger.info(
-                        f"Account {acc:2} | SUCCESS | "
-                        f"Daily uses: {daily_count[acc]}/{self.max_daily_per_account} | "
-                        f"Next available: {next_available}"
-                    )
-                    
-                    # ADDED: Update progress tracker
-                    _progress_tracker.update_progress(votes_done, "running")
-
-            logger.info(f"Batch completed: {success_count} successes, {len(batch)-success_count} failures")
-            logger.info(f"Total progress: {votes_done}/{self.upvotes} ({votes_done/self.upvotes:.1%})")
-
-            # Save the updated state to the file after each batch
-            state = {
-                str(acc): {
-                    'last_upvote': last_upvote[acc].isoformat(),
-                    'daily_count': daily_count[acc]
-                } for acc in account_ids
-            }
-            save_state(state)
-
-            # Wait for next batch
-            elapsed = (datetime.now() - now).total_seconds()
-            if elapsed < 60:
-                wait_time = 60 - elapsed
-                logger.debug(f"Sleeping {wait_time:.1f}s until next batch")
-                await asyncio.sleep(wait_time)
-
-        logger.info("All batches completed successfully")
-        # ADDED: Mark as completed
-        _progress_tracker.update_progress(votes_done, "completed")
-
-
 def get_progress_status() -> Dict[str, Any]:
     """Get the current progress status."""
     global _progress_tracker
@@ -387,19 +301,13 @@ def get_progress_status() -> Dict[str, Any]:
         return {
             "success": False,
             "status": "not_found",
-            "error": "No active session",
-            "upvotes_done": 0,
-            "progress_percentage": 0
+            "error": "No active session"
         }
     
     status = _progress_tracker.get_status()
     return {
         "success": True,
-        "status": status["status"],
-        "upvotes_done": status["upvotes_done"],
-        "total_upvotes": status["total_upvotes"],
-        "progress_percentage": status["progress_percentage"],
-        "error": status["error"]
+        **status
     }
 
 
@@ -418,17 +326,15 @@ def parse_json_input() -> Optional[Dict[str, Any]]:
         return None
 
 
-def create_result_json(success: bool, status: str, upvotes_done: int = 0, 
-                      total_upvotes: int = 0, progress_percentage: float = 0.0,
-                      error: str = None, order_id: str = None) -> Dict[str, Any]:
+def create_result_json(success: bool, status: str, error: str = None, order_id: str = None, **kwargs) -> Dict[str, Any]:
     """Create a standardized result JSON."""
     result = {
         "success": success,
-        "status": status,
-        "upvotes_done": upvotes_done,
-        "total_upvotes": total_upvotes,
-        "progress_percentage": progress_percentage
+        "status": status
     }
+    
+    # Add any additional fields from kwargs
+    result.update(kwargs)
     
     if error:
         result["error"] = error
@@ -559,11 +465,12 @@ async def main():
         result = create_result_json(
             success=success,
             status=final_status["status"],
-            upvotes_done=final_status["upvotes_done"],
-            total_upvotes=final_status["total_upvotes"],
-            progress_percentage=final_status["progress_percentage"],
             error=final_status["error"],
-            order_id=order_id
+            order_id=order_id,
+            total_upvotes=final_status["total_upvotes"],
+            start_time=final_status["start_time"],
+            end_time=final_status["end_time"],
+            is_running=final_status["is_running"]
         )
         
         # Output result as JSON
