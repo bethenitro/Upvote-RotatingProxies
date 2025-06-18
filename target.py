@@ -166,13 +166,14 @@ async def orchestrate_batches(
                 while proxy_attempt < max_proxy_attempts:
                     try:
                         # Rotate proxy before each upvote to get a fresh IP
-                        proxy_config = rotate_proxy()
+                        proxy_config = rotate_proxy(logger)
                         logger.debug(f"Using proxy configuration for account {acc}: {proxy_config['server']}")
                         tasks.append(
                             upvote_post(
                                 acc,
                                 post_url,
-                                proxy_config=proxy_config
+                                proxy_config=proxy_config,
+                                custom_logger=logger
                             )
                         )
                         break  # Successfully got a rotated proxy, proceed with the task
@@ -317,13 +318,14 @@ async def orchestrate_batches_low_data(
             try:
                 account = account_data[str(acc)]
                 # Rotate proxy before each upvote to get a fresh IP
-                proxy_config = rotate_proxy()
+                proxy_config = rotate_proxy(log)
                 log.debug(f"Using proxy configuration for account {acc}: {proxy_config['server']}")
                 tasks.append(
                     upvote_post_low_data(
                         acc,
                         post_url,
-                        proxy_config=proxy_config
+                        proxy_config=proxy_config,
+                        custom_logger=log
                     )
                 )
             except KeyError:

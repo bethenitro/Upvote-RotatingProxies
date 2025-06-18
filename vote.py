@@ -9,16 +9,21 @@ from browserforge.fingerprints import Fingerprint, Screen
 from camoufox.async_api import AsyncCamoufox
 from datetime import datetime, timedelta
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,  # Set to DEBUG for detailed logging
-    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-    handlers=[
-        logging.FileHandler('reddit_stealth.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+def setup_logging(log_file: str = 'reddit_stealth.log'):
+    """Setup logging with custom log file."""
+    logging.basicConfig(
+        level=logging.DEBUG,  
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler()
+        ],
+        force=True
+    )
+    return logging.getLogger(__name__)
+
+# Default logger setup
+logger = setup_logging()
 from typing import get_origin, get_args, Union
 
 def dict_to_dataclass(cls: type, d: Any) -> Any:
@@ -246,24 +251,26 @@ class StealthEnhancer:
             raise
 
 
-async def upvote_post(account_id: int, post_url: str, proxy_config: Dict[str, Any] = None):
-    logger.info(f"[Account {account_id}] : Starting upvote process for account {account_id} on post {post_url}")
+async def upvote_post(account_id: int, post_url: str, proxy_config: Dict[str, Any] = None, custom_logger: logging.Logger = None):
+    # Use custom logger if provided, otherwise use default
+    log = custom_logger if custom_logger else logger
+    log.info(f"[Account {account_id}] : Starting upvote process for account {account_id} on post {post_url}")
     try:
         stealth = StealthEnhancer(account_id)
         cookies_file = os.path.join("profiles", str(account_id), f"cookies_{account_id}.json")
-        logger.debug(f"[Account {account_id}] Loading cookies from {cookies_file}")
+        log.debug(f"[Account {account_id}] Loading cookies from {cookies_file}")
 
         try:
             with open(cookies_file, "r") as f:
                 cookies = json.load(f)
-            logger.info(f" [Account {account_id}] Cookies loaded successfully for account {account_id}")
+            log.info(f" [Account {account_id}] Cookies loaded successfully for account {account_id}")
         except Exception as e:
-            logger.error(f" [Account {account_id}] Failed to load cookies: {str(e)}")
+            log.error(f" [Account {account_id}] Failed to load cookies: {str(e)}")
             raise
 
         config = {
             "fingerprint": stealth.fingerprint,
-            "headless": "virtual",
+            "headless": True,
             "os": "windows",
             "screen": Screen(max_width=1280, max_height=720),
             "geoip": True,
@@ -272,59 +279,59 @@ async def upvote_post(account_id: int, post_url: str, proxy_config: Dict[str, An
         }
         if proxy_config:
             config["proxy"] = proxy_config
-            logger.debug(f" [Account {account_id}] Using proxy configuration: {proxy_config}")
+            log.debug(f" [Account {account_id}] Using proxy configuration: {proxy_config}")
 
-        logger.debug(f"[Account {account_id}] Browser configuration")
+        log.debug(f"[Account {account_id}] Browser configuration")
         # async with AsyncCamoufox(headless="virtual",**config) as browser:
         async with AsyncCamoufox(**config) as browser:
             try:
                 page = await browser.new_page()
-                logger.info(f"[Account {account_id}] New browser page created for account {account_id}")
+                log.info(f"[Account {account_id}] New browser page created for account {account_id}")
 
                 await page.context.add_cookies(cookies)
-                logger.debug(f"[Account {account_id}] Cookies added to browser context")
+                log.debug(f"[Account {account_id}] Cookies added to browser context")
 
                 await page.set_extra_http_headers({
                     'Referer': random.choice(['https://www.google.com/', 'https://x.com/', 'https://www.reddit.com/'])
                 })
-                logger.debug(f"[Account {account_id}] Extra HTTP headers set")
+                log.debug(f"[Account {account_id}] Extra HTTP headers set")
 
                 await HumanBehavior.random_delay(1000, 3000)
-                logger.info(f" [Account {account_id}] Navigating to Reddit homepage")
+                log.info(f" [Account {account_id}] Navigating to Reddit homepage")
                 await page.goto('https://www.reddit.com/', wait_until='domcontentloaded')
-                logger.debug(f" [Account {account_id}] Reddit homepage loaded")
+                log.debug(f" [Account {account_id}] Reddit homepage loaded")
                 await HumanBehavior.random_delay(500, 1000)
                 await HumanBehavior.human_scroll(page)
                 await HumanBehavior.random_delay(2000, 5000)
 
-                logger.info(f"[Account {account_id}] Navigating to post URL: {post_url}")
+                log.info(f"[Account {account_id}] Navigating to post URL: {post_url}")
                 await page.goto(post_url)
-                logger.debug(f"[Account {account_id}] Post page loaded: {post_url}")
+                log.debug(f"[Account {account_id}] Post page loaded: {post_url}")
                 await HumanBehavior.random_delay(8000, 20000)
 
                 upvote_selector = 'button:has(svg[icon-name="upvote-outline"])'
                 voted_selector = 'button:has(svg[icon-name="upvote-fill"])'
-                logger.debug(f"[Account {account_id}] Querying for upvote button with selector: {upvote_selector}")
+                log.debug(f"[Account {account_id}] Querying for upvote button with selector: {upvote_selector}")
 
                 button = await page.query_selector(upvote_selector)
-                logger.info(button)
+                log.info(button)
                 if button is None:
-                    logger.warning(f"[Account {account_id}] Upvote button not found, checking if already upvoted")
+                    log.warning(f"[Account {account_id}] Upvote button not found, checking if already upvoted")
                     voted_button = await page.query_selector(voted_selector)
                     if voted_button:
-                        logger.info(f"[Account {account_id}] Post already upvoted: {post_url}")
+                        log.info(f"[Account {account_id}] Post already upvoted: {post_url}")
                         await HumanBehavior.random_delay(2000, 3500)
                         return
                     else:
-                        logger.error(f"[Account {account_id}] Neither upvote nor voted button found for {post_url}")
+                        log.error(f"[Account {account_id}] Neither upvote nor voted button found for {post_url}")
                         raise Exception("Upvote button not found")
 
-                logger.debug(f"[Account {account_id}] Upvote button found")
+                log.debug(f"[Account {account_id}] Upvote button found")
                 aria_pressed = await button.get_attribute('aria-pressed')
-                logger.debug(f"[Account {account_id}] Upvote button aria-pressed: {aria_pressed}")
+                log.debug(f"[Account {account_id}] Upvote button aria-pressed: {aria_pressed}")
 
                 if aria_pressed == "false":
-                    logger.info(f"[Account {account_id}] Post not upvoted, performing upvote: {post_url}")
+                    log.info(f"[Account {account_id}] Post not upvoted, performing upvote: {post_url}")
                     
                     # Add retry mechanism for click
                     max_retries = 3
@@ -342,7 +349,7 @@ async def upvote_post(account_id: int, post_url: str, proxy_config: Dict[str, An
                             is_enabled = await button.is_enabled()
                             
                             if not is_visible or not is_enabled:
-                                logger.warning(f"[Account {account_id}] Button not ready for click (visible: {is_visible}, enabled: {is_enabled})")
+                                log.warning(f"[Account {account_id}] Button not ready for click (visible: {is_visible}, enabled: {is_enabled})")
                                 retry_count += 1
                                 await HumanBehavior.random_delay(2000, 4000)
                                 continue
@@ -350,11 +357,11 @@ async def upvote_post(account_id: int, post_url: str, proxy_config: Dict[str, An
                             # Try to click with increased timeout
                             await button.click(timeout=60000)  # Increased timeout to 60 seconds
                             click_success = True
-                            logger.debug(f"[Account {account_id}] Upvote button clicked successfully")
+                            log.debug(f"[Account {account_id}] Upvote button clicked successfully")
                             
                         except Exception as e:
                             retry_count += 1
-                            logger.warning(f"[Account {account_id}] Click attempt {retry_count} failed: {str(e)}")
+                            log.warning(f"[Account {account_id}] Click attempt {retry_count} failed: {str(e)}")
                             if retry_count < max_retries:
                                 await HumanBehavior.random_delay(2000, 4000)
                             else:
@@ -366,15 +373,15 @@ async def upvote_post(account_id: int, post_url: str, proxy_config: Dict[str, An
                     if button2:
                         aria_pressed2 = await button2.get_attribute('aria-pressed')
                         if aria_pressed2 == "true":
-                            logger.info(f"[Account {account_id}] Successfully upvoted post: {post_url}")
+                            log.info(f"[Account {account_id}] Successfully upvoted post: {post_url}")
                         else:
-                            logger.error(f"[Account {account_id}] Upvote validation failed, aria-pressed: {aria_pressed2}")
+                            log.error(f"[Account {account_id}] Upvote validation failed, aria-pressed: {aria_pressed2}")
                             raise Exception(f"[Account {account_id}] Upvote validation failed")
                     else:
-                        logger.error(f"[Account {account_id}] Failed to find upvoted button after click")
+                        log.error(f"[Account {account_id}] Failed to find upvoted button after click")
                         raise Exception(f"[Account {account_id}] Upvoted button not found")
                 else:
-                    logger.info(f"[Account {account_id}] Post already upvoted: {post_url}")
+                    log.info(f"[Account {account_id}] Post already upvoted: {post_url}")
 
                 await HumanBehavior.random_delay(2000, 5000)
                 random_pages = [
@@ -390,22 +397,23 @@ async def upvote_post(account_id: int, post_url: str, proxy_config: Dict[str, An
                     'https://www.reddit.com/r/DIY/', 'https://www.reddit.com/r/EarthPorn/', 'https://www.reddit.com/r/space/'
                 ]
                 random_page = random.choice(random_pages)
-                logger.info(f"[Account {account_id}] Navigating to random page: {random_page}")
+                log.info(f"[Account {account_id}] Navigating to random page: {random_page}")
                 await page.goto(random_page)
                 await HumanBehavior.random_delay(1000, 5000)
             except Exception as e:
-                logger.error(f"[Account {account_id}] Error during browser operations for {post_url}: {str(e)}")
+                log.error(f"[Account {account_id}] Error during browser operations for {post_url}: {str(e)}")
                 raise
             finally:
                 if 'page' in locals():
-                    logger.debug("Closing page")
+                    log.debug("Closing page")
                     await page.close()
     except Exception as e:
-        logger.error(f"[Account {account_id}] Upvote process failed for {post_url}: {str(e)}")
+        log.error(f"[Account {account_id}] Upvote process failed for {post_url}: {str(e)}")
         raise
 
-async def orchestrate_upvotes(account_id: int, post_urls: list, proxy_config: Dict[str, Any] = None):
-    logger.info(f"[Account {account_id}] Starting upvote orchestration for account {account_id} on {len(post_urls)} posts")
+async def orchestrate_upvotes(account_id: int, post_urls: list, proxy_config: Dict[str, Any] = None, custom_logger: logging.Logger = None):
+    log = custom_logger if custom_logger else logger
+    log.info(f"[Account {account_id}] Starting upvote orchestration for account {account_id} on {len(post_urls)} posts")
     try:
         # Calculate time intervals for 24 hours (86400 seconds)
         total_time = 86400  # 24 hours in seconds
@@ -422,47 +430,49 @@ async def orchestrate_upvotes(account_id: int, post_urls: list, proxy_config: Di
             times.append(next_time)
             last_time = next_time
         times.sort()
-        logger.debug(f"[Account {account_id}] Scheduled upvote times: {[datetime.now() + timedelta(seconds=t) for t in times]}")
+        log.debug(f"[Account {account_id}] Scheduled upvote times: {[datetime.now() + timedelta(seconds=t) for t in times]}")
 
         for i, (post_url, delay) in enumerate(zip(post_urls, times)):
             
             if i == 0:
-                logger.info(f"[Account {account_id}] Immediately executing upvote 1/{max_posts} for {post_url}")
+                log.info(f"[Account {account_id}] Immediately executing upvote 1/{max_posts} for {post_url}")
             else:
                 wait_time = delay - times[i - 1]
-                logger.info(f"[Account {account_id}] Scheduling upvote {i + 1}/{max_posts} for {post_url} after {wait_time:.2f} seconds")
+                log.info(f"[Account {account_id}] Scheduling upvote {i + 1}/{max_posts} for {post_url} after {wait_time:.2f} seconds")
                 await asyncio.sleep(wait_time)
 
-            logger.debug(f"[Account {account_id}] Executing upvote for {post_url}")
+            log.debug(f"[Account {account_id}] Executing upvote for {post_url}")
             
             try:
                 await upvote_post(account_id, post_url)
-                logger.info(f"[Account {account_id}] Completed upvote {i + 1}/{max_posts} for {post_url}")
+                log.info(f"[Account {account_id}] Completed upvote {i + 1}/{max_posts} for {post_url}")
             except Exception as e:
-                logger.error(f"[Account {account_id}] Failed upvote {i + 1}/{max_posts} for {post_url}: {str(e)}")
+                log.error(f"[Account {account_id}] Failed upvote {i + 1}/{max_posts} for {post_url}: {str(e)}")
                 continue  # Continue with next post despite error
     except Exception as e:
-        logger.error(f"[Account {account_id}] Orchestration failed: {str(e)}")
+        log.error(f"[Account {account_id}] Orchestration failed: {str(e)}")
         raise
 
-async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dict[str, Any] = None):
-    logger.info(f"[Account {account_id}] : Starting upvote process for account {account_id} on post {post_url}")
+async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dict[str, Any] = None, custom_logger: logging.Logger = None):
+    # Use custom logger if provided, otherwise use default
+    log = custom_logger if custom_logger else logger
+    log.info(f"[Account {account_id}] : Starting upvote process for account {account_id} on post {post_url}")
     try:
         stealth = StealthEnhancer(account_id)
         cookies_file = os.path.join("profiles", str(account_id), f"cookies_{account_id}.json")
-        logger.debug(f"[Account {account_id}] Loading cookies from {cookies_file}")
+        log.debug(f"[Account {account_id}] Loading cookies from {cookies_file}")
 
         try:
             with open(cookies_file, "r") as f:
                 cookies = json.load(f)
-            logger.info(f" [Account {account_id}] Cookies loaded successfully for account {account_id}")
+            log.info(f" [Account {account_id}] Cookies loaded successfully for account {account_id}")
         except Exception as e:
-            logger.error(f" [Account {account_id}] Failed to load cookies: {str(e)}")
+            log.error(f" [Account {account_id}] Failed to load cookies: {str(e)}")
             raise
 
         config = {
             "fingerprint": stealth.fingerprint,
-            "headless": "virtual",
+            "headless": True,
             "os": "windows",
             "screen": Screen(max_width=1280, max_height=720),
             "geoip": True,
@@ -473,59 +483,59 @@ async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dic
 
         if proxy_config:
             config["proxy"] = proxy_config
-            logger.debug(f" [Account {account_id}] Using proxy configuration: {proxy_config}")
+            log.debug(f" [Account {account_id}] Using proxy configuration: {proxy_config}")
 
-        logger.debug(f"[Account {account_id}] Browser configuration")
+        log.debug(f"[Account {account_id}] Browser configuration")
         # async with AsyncCamoufox(headless="virtual",**config) as browser:
         async with AsyncCamoufox(**config) as browser:
             try:
                 page = await browser.new_page()
-                logger.info(f"[Account {account_id}] New browser page created for account {account_id}")
+                log.info(f"[Account {account_id}] New browser page created for account {account_id}")
 
                 await page.context.add_cookies(cookies)
-                logger.debug(f"[Account {account_id}] Cookies added to browser context")
+                log.debug(f"[Account {account_id}] Cookies added to browser context")
 
                 await page.set_extra_http_headers({
                     'Referer': random.choice(['https://www.google.com/', 'https://x.com/', 'https://www.reddit.com/'])
                 })
-                logger.debug(f"[Account {account_id}] Extra HTTP headers set")
+                log.debug(f"[Account {account_id}] Extra HTTP headers set")
 
                 await HumanBehavior.random_delay(1000, 3000)
-                logger.info(f" [Account {account_id}] Navigating to Reddit homepage")
+                log.info(f" [Account {account_id}] Navigating to Reddit homepage")
                 await page.goto('https://www.reddit.com/', wait_until='domcontentloaded')
-                logger.debug(f" [Account {account_id}] Reddit homepage loaded")
+                log.debug(f" [Account {account_id}] Reddit homepage loaded")
                 await HumanBehavior.random_delay(500, 1000)
                 await HumanBehavior.human_scroll(page)
                 await HumanBehavior.random_delay(2000, 5000)
 
-                logger.info(f"[Account {account_id}] Navigating to post URL: {post_url}")
+                log.info(f"[Account {account_id}] Navigating to post URL: {post_url}")
                 await page.goto(post_url)
-                logger.debug(f"[Account {account_id}] Post page loaded: {post_url}")
+                log.debug(f"[Account {account_id}] Post page loaded: {post_url}")
                 await HumanBehavior.random_delay(8000, 20000)
 
                 upvote_selector = 'button:has(svg[icon-name="upvote-outline"])'
                 voted_selector = 'button:has(svg[icon-name="upvote-fill"])'
-                logger.debug(f"[Account {account_id}] Querying for upvote button with selector: {upvote_selector}")
+                log.debug(f"[Account {account_id}] Querying for upvote button with selector: {upvote_selector}")
 
                 button = await page.query_selector(upvote_selector)
-                logger.info(button)
+                log.info(button)
                 if button is None:
-                    logger.warning(f"[Account {account_id}] Upvote button not found, checking if already upvoted")
+                    log.warning(f"[Account {account_id}] Upvote button not found, checking if already upvoted")
                     voted_button = await page.query_selector(voted_selector)
                     if voted_button:
-                        logger.info(f"[Account {account_id}] Post already upvoted: {post_url}")
+                        log.info(f"[Account {account_id}] Post already upvoted: {post_url}")
                         await HumanBehavior.random_delay(2000, 3500)
                         return
                     else:
-                        logger.error(f"[Account {account_id}] Neither upvote nor voted button found for {post_url}")
+                        log.error(f"[Account {account_id}] Neither upvote nor voted button found for {post_url}")
                         raise Exception("Upvote button not found")
 
-                logger.debug(f"[Account {account_id}] Upvote button found")
+                log.debug(f"[Account {account_id}] Upvote button found")
                 aria_pressed = await button.get_attribute('aria-pressed')
-                logger.debug(f"[Account {account_id}] Upvote button aria-pressed: {aria_pressed}")
+                log.debug(f"[Account {account_id}] Upvote button aria-pressed: {aria_pressed}")
 
                 if aria_pressed == "false":
-                    logger.info(f"[Account {account_id}] Post not upvoted, performing upvote: {post_url}")
+                    log.info(f"[Account {account_id}] Post not upvoted, performing upvote: {post_url}")
                     
                     # Add retry mechanism for click
                     max_retries = 3
@@ -543,7 +553,7 @@ async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dic
                             is_enabled = await button.is_enabled()
                             
                             if not is_visible or not is_enabled:
-                                logger.warning(f"[Account {account_id}] Button not ready for click (visible: {is_visible}, enabled: {is_enabled})")
+                                log.warning(f"[Account {account_id}] Button not ready for click (visible: {is_visible}, enabled: {is_enabled})")
                                 retry_count += 1
                                 await HumanBehavior.random_delay(2000, 4000)
                                 continue
@@ -551,11 +561,11 @@ async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dic
                             # Try to click with increased timeout
                             await button.click(timeout=60000)  # Increased timeout to 60 seconds
                             click_success = True
-                            logger.debug(f"[Account {account_id}] Upvote button clicked successfully")
+                            log.debug(f"[Account {account_id}] Upvote button clicked successfully")
                             
                         except Exception as e:
                             retry_count += 1
-                            logger.warning(f"[Account {account_id}] Click attempt {retry_count} failed: {str(e)}")
+                            log.warning(f"[Account {account_id}] Click attempt {retry_count} failed: {str(e)}")
                             if retry_count < max_retries:
                                 await HumanBehavior.random_delay(2000, 4000)
                             else:
@@ -567,15 +577,15 @@ async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dic
                     if button2:
                         aria_pressed2 = await button2.get_attribute('aria-pressed')
                         if aria_pressed2 == "true":
-                            logger.info(f"[Account {account_id}] Successfully upvoted post: {post_url}")
+                            log.info(f"[Account {account_id}] Successfully upvoted post: {post_url}")
                         else:
-                            logger.error(f"[Account {account_id}] Upvote validation failed, aria-pressed: {aria_pressed2}")
+                            log.error(f"[Account {account_id}] Upvote validation failed, aria-pressed: {aria_pressed2}")
                             raise Exception(f"[Account {account_id}] Upvote validation failed")
                     else:
-                        logger.error(f"[Account {account_id}] Failed to find upvoted button after click")
+                        log.error(f"[Account {account_id}] Failed to find upvoted button after click")
                         raise Exception(f"[Account {account_id}] Upvoted button not found")
                 else:
-                    logger.info(f"[Account {account_id}] Post already upvoted: {post_url}")
+                    log.info(f"[Account {account_id}] Post already upvoted: {post_url}")
 
                 await HumanBehavior.random_delay(2000, 5000)
                 random_pages = [
@@ -591,18 +601,18 @@ async def upvote_post_low_data(account_id: int, post_url: str, proxy_config: Dic
                     'https://www.reddit.com/r/DIY/', 'https://www.reddit.com/r/EarthPorn/', 'https://www.reddit.com/r/space/'
                 ]
                 random_page = random.choice(random_pages)
-                logger.info(f"[Account {account_id}] Navigating to random page: {random_page}")
+                log.info(f"[Account {account_id}] Navigating to random page: {random_page}")
                 await page.goto(random_page)
                 await HumanBehavior.random_delay(1000, 5000)
             except Exception as e:
-                logger.error(f"[Account {account_id}] Error during browser operations for {post_url}: {str(e)}")
+                log.error(f"[Account {account_id}] Error during browser operations for {post_url}: {str(e)}")
                 raise
             finally:
                 if 'page' in locals():
-                    logger.debug("Closing page")
+                    log.debug("Closing page")
                     await page.close()
     except Exception as e:
-        logger.error(f"[Account {account_id}] Upvote process failed for {post_url}: {str(e)}")
+        log.error(f"[Account {account_id}] Upvote process failed for {post_url}: {str(e)}")
         raise
 
 
